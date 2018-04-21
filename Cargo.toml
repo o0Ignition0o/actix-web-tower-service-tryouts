@@ -1,0 +1,12 @@
+[package]
+name = "actix-hello-world"
+version = "0.1.0"
+authors = ["o0Ignition0o <jeremy.lempereur@gmail.com>"]
+
+[dependencies]
+env_logger = "0.5"
+actix = "0.5"
+actix-web = { version = "^0.5", features=["alpn"] }
+openssl = { version="0.10" }
+futures = "*"
+tower = { git = "https://github.com/tower-rs/tower" }
