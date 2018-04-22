@@ -5,44 +5,72 @@ extern crate futures;
 extern crate openssl;
 extern crate tower;
 
+use futures::prelude::{Async, Poll};
 use std::sync::Arc;
-use tower::ReadyService;
+use tower::Service;
 use actix_web::*;
 use futures::future::{result, Future};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use actix_web::{server, App, HttpRequest, dev::Handler};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
+trait ServiceHandlerBridge<S>
+where
+    S: 'static,
+{
+    fn invoke(
+        &mut self,
+        request: HttpRequest<S>,
+    ) -> Box<Future<Item = HttpResponse, Error = Error>>;
+}
+
+impl<S> Service for ServiceHandlerBridge<S>
+where
+    ServiceHandlerBridge<S>: 'static,
+{
+    type Request = HttpRequest<S>;
+    type Response = HttpResponse;
+    type Error = Error;
+    type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Ok(Async::Ready(()))
+    }
+
+    fn call(&mut self, request: HttpRequest<S>) -> Self::Future {
+        self.invoke(request)
+    }
+}
+
+impl<S> Handler<S> for ServiceHandlerBridge<S>
+where
+    S: 'static,
+{
+    type Result = Box<Future<Item = HttpResponse, Error = Error>>;
+
+    fn handle(&mut self, request: HttpRequest<S>) -> Self::Result {
+        self.invoke(request)
+    }
+}
+
 struct HelloWorld(Arc<AtomicUsize>);
 
-impl HelloWorld {
-    fn greet(&mut self, name: String) -> Box<Future<Item = String, Error = Error>> {
+impl<S> ServiceHandlerBridge<S> for HelloWorld
+where
+    S: 'static,
+{
+    fn invoke(
+        &mut self,
+        request: HttpRequest<S>,
+    ) -> Box<Future<Item = HttpResponse, Error = Error>> {
+        let name: String = request.query().get("name").unwrap_or("world").into();
         let times_invoked = self.0.fetch_add(1, Relaxed);
         let hello_response = format!(
             "Hello {}, welcome to the actix tower-service test ! I've been invoked {} times so far :)",
             name,
             times_invoked
         );
-        result(Ok(hello_response)).responder()
-    }
-}
-
-impl<S> Handler<S> for HelloWorld {
-    type Result = Box<Future<Item = String, Error = Error>>;
-
-    fn handle(&mut self, request: HttpRequest<S>) -> Self::Result {
-        self.greet(request.query().get("name").unwrap_or("world").into())
-    }
-}
-
-impl ReadyService for HelloWorld {
-    type Request = HttpRequest;
-    type Response = String;
-    type Error = Error;
-    type Future = Box<Future<Item = String, Error = Error>>;
-
-    fn call(&mut self, request: HttpRequest) -> Self::Future {
-        self.greet(request.query().get("name").unwrap_or("world").into())
+        result(Ok(HttpResponse::from(hello_response))).responder()
     }
 }
 
